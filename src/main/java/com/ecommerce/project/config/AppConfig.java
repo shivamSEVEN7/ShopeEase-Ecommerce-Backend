@@ -22,11 +22,11 @@ import ua_parser.UserAgentParser;
 
 @Configuration
 public class AppConfig {
-    @Value("${cloudianry.config.name}")
+    @Value("${cloudinary.config.name}")
     private String cloudinaryName;
-    @Value("${cloudianry.config.key}")
+    @Value("${cloudinary.config.key}")
     private String cloudinaryKey;
-    @Value("${cloudianry.config.secret}")
+    @Value("${cloudinary.config.secret}")
     private String cloudinarySecret;
 
     @Bean
