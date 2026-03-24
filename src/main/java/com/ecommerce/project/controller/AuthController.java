@@ -5,6 +5,7 @@ import com.ecommerce.project.dto.UserDTO;
 import com.ecommerce.project.model.*;
 import com.ecommerce.project.repositories.RefreshTokenRepo;
 import com.ecommerce.project.repositories.RoleRepo;
+import com.ecommerce.project.repositories.SessionRepo;
 import com.ecommerce.project.repositories.UserRepo;
 import com.ecommerce.project.security.jwt.JwtUtil;
 import com.ecommerce.project.security.request.LoginRequest;
@@ -13,6 +14,7 @@ import com.ecommerce.project.security.response.LoginResponse;
 import com.ecommerce.project.security.response.UserInfoResponse;
 import com.ecommerce.project.security.service.UserDetailsImpl;
 import com.ecommerce.project.service.EmailService;
+import com.ecommerce.project.service.HmacService;
 import com.ecommerce.project.service.OtpService;
 import com.ecommerce.project.service.RefreshTokenService;
 import com.ecommerce.project.utility.ClientInfoUtil;
@@ -31,13 +33,16 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 @Slf4j
@@ -60,21 +65,73 @@ public class AuthController {
     ClientInfoUtil clientInfoUtil;
     @Autowired
     RefreshTokenRepo refreshTokenRepo;
-    @Value("${jwt.expiration}")
-    private long jwtExpiry;
+    @Value("${refreshtoken.expiration}")
+    private long refreshTokenExpiry;
     @Autowired
     private ModelMapper modelMapper;
     @Autowired
     private OtpService otpService;
     @Autowired
     private EmailService emailService;
+    @Autowired
+    private SessionRepo sessionRepo;
+    @Autowired
+    private HmacService hmacService;
 
 
    @PostMapping("/refresh")
-   ResponseEntity<?> refreshToken(@CookieValue(value = "refreshToken", required = false) String refreshToken, @CookieValue(value = "sessionId", required = false) String sessionId){
-       RefreshToken oldRefreshToken = refreshTokenService.validateRefreshToken(refreshToken, sessionId);
-       if(oldRefreshToken==null){
-           System.out.println("deleting tokens");
+   ResponseEntity<?> issueTokens(@CookieValue(value = "refreshToken", required = false) String refreshToken, @CookieValue(value = "sessionId", required = false) String sessionId, HttpServletRequest request){
+       String hashedOldRefreshToken = hmacService.hash(refreshToken);
+       if(refreshTokenService.validateRefreshToken(hashedOldRefreshToken,sessionId)){
+           String newRawRefreshToken = UUID.randomUUID().toString();
+           RefreshToken newRefreshToken = null;
+            Optional<RefreshToken> oldRefreshTokenOptional = refreshTokenRepo.findByHashedRefreshToken(hashedOldRefreshToken);
+            RefreshToken oldRefreshToken = oldRefreshTokenOptional.get();
+           if (oldRefreshToken.isUsed()) {
+               if (oldRefreshToken.isWithinGracePeriod()) {
+                   newRefreshToken = refreshTokenService.rotateRefreshTokens(oldRefreshToken, newRawRefreshToken);
+               } else {
+                   System.out.println("Token Reuse Detected");
+               }
+           }
+           else{
+               newRefreshToken = refreshTokenService.rotateRefreshTokens(oldRefreshToken, newRawRefreshToken);
+           }
+           User user = newRefreshToken.getUser();
+           List<String> roles = user.getRoles().stream().map(role -> role.getRoleName().toString()).toList();
+           String newJwtToken = jwtUtil.generateToken(user.getUsername());
+           UserDTO userDTO = modelMapper.map(newRefreshToken.getUser(), UserDTO.class);
+           List<Session> activeSessions = sessionRepo.findByUserUserIdAndActiveTrue(user.getUserId());
+           for(Session session1 : activeSessions){
+               userDTO.getActiveSessions().add(new SessionInfo(session1.getSessionId(), session1.getDeviceType(), session1.getDeviceInfo(), session1.getIpAddress(), session1.getCreatedAt(), session1.getSessionId().equals(sessionId)));
+           }
+           ResponseCookie refreshTokenCookie = ResponseCookie.from("refreshToken", newRawRefreshToken)
+                   .httpOnly(true)
+                   .secure(false)
+                   .path("/")
+                   .maxAge(Duration.between(OffsetDateTime.now(), newRefreshToken.getExpiry()))
+                   .sameSite("lax")
+                   .build();
+           ResponseCookie sessionIdCookie = ResponseCookie.from("sessionId", newRefreshToken.getSession().getSessionId())
+                   .httpOnly(true)
+                   .secure(false)
+                   .path("/")
+                   .maxAge(Duration.between(OffsetDateTime.now(), newRefreshToken .getExpiry()))
+                   .sameSite("lax")
+                   .build();
+           return ResponseEntity.ok()
+                   .header(HttpHeaders.SET_COOKIE, refreshTokenCookie.toString())
+                   .header(HttpHeaders.SET_COOKIE, sessionIdCookie.toString())
+                   .body(new LoginResponse(
+                           userDTO,
+                           user.getUsername(),
+                           newJwtToken,
+                           roles,
+                           OffsetDateTime.now().plusMinutes(refreshTokenExpiry)
+                   ));
+       }
+       else {
+           System.out.println("Inalid Refresh token found now logout");
            ResponseCookie refreshTokenCookie = ResponseCookie.from("refreshToken", null)
                    .httpOnly(true)
                    .secure(false)
@@ -94,27 +151,6 @@ public class AuthController {
                    .body(Map.of("error", "Unauthorized", "message", "Invalid token"));
        }
 
-           String rawRefreshToken = UUID.randomUUID().toString();
-           RefreshToken newRefreshToken = refreshTokenService.refreshToken(oldRefreshToken, rawRefreshToken);
-       List<String> roles = newRefreshToken.getUser().getRoles().stream().map(role -> role.getRoleName().toString()).toList();
-           String newJwtToken = jwtUtil.generateToken(newRefreshToken.getUser().getUsername());
-       UserDTO userDTO = modelMapper.map(newRefreshToken.getUser(), UserDTO.class);
-       List<RefreshToken> refreshTokens = refreshTokenService.fetchRefreshTokensOfUser(newRefreshToken.getUser().getUserId());
-       for(RefreshToken refreshToken1 : refreshTokens){
-           userDTO.getActiveSessions().add(new SessionInfo(refreshToken1.getSessionId(), refreshToken1.getDeviceType(), refreshToken1.getDeviceInfo(), refreshToken1.getIpAddress(), refreshToken1.getCreatedAt(), sessionId.equals(refreshToken1.getSessionId())));
-       }
-           ResponseCookie refreshTokenCookie = ResponseCookie.from("refreshToken", rawRefreshToken)
-                   .httpOnly(true)
-                   .secure(false)
-                   .path("/")
-                   .maxAge(Duration.between(Instant.now(), newRefreshToken.getExpiry()))
-                   .sameSite("lax")
-                   .build();
-
-
-                return ResponseEntity.ok()
-               .header(HttpHeaders.SET_COOKIE, refreshTokenCookie.toString())
-               .body(new LoginResponse(userDTO, newRefreshToken.getUser().getUsername(),newJwtToken, roles, Instant.now().plusMillis(jwtExpiry)));
    }
 
     @PostMapping("/login")
@@ -129,33 +165,50 @@ public class AuthController {
                                "message", "Your account is not verified"
                        ));
            }
-            String token = jwtUtil.generateToken(loginRequest.getUsername());
+
+            Session session = Session.builder()
+                    .sessionId(UUID.randomUUID().toString())
+                    .user(userRepo.findByUsername(loginRequest.getUsername()).orElseThrow(() -> new UsernameNotFoundException("Username not found")))
+                    .deviceType(clientInfoUtil.getDeviceType(request))
+                    .deviceInfo(clientInfoUtil.getClientDeviceInfo(request))
+                    .ipAddress(clientInfoUtil.getClientIpAddress(request))
+                    .active(true)
+                    .build();
+            sessionRepo.save(session);
+           String token = jwtUtil.generateToken(loginRequest.getUsername());
            String rawRefreshToken = UUID.randomUUID().toString();
-           RefreshToken refreshToken = refreshTokenService.generateRefreshToken(rawRefreshToken, loginRequest.getUsername(), request);
+           RefreshToken refreshToken = refreshTokenService.generateRefreshToken(rawRefreshToken, loginRequest.getUsername(), session);
            List<String> roles = refreshToken.getUser().getRoles().stream().map(role -> role.getRoleName().toString()).toList();
            refreshTokenRepo.save(refreshToken);
            ResponseCookie refreshTokenCookie = ResponseCookie.from("refreshToken", rawRefreshToken)
                     .httpOnly(true)
                     .secure(false)
                     .path("/")
-                    .maxAge(Duration.between(Instant.now(), refreshToken.getExpiry()))
+                    .maxAge(Duration.between(OffsetDateTime.now(), refreshToken.getExpiry()))
                     .sameSite("lax")
                     .build();
-           ResponseCookie sessionIdCookie = ResponseCookie.from("sessionId", refreshToken.getSessionId())
+           ResponseCookie sessionIdCookie = ResponseCookie.from("sessionId", session.getSessionId())
                     .httpOnly(true)
                     .secure(false)
                     .path("/")
-                    .maxAge(Duration.between(Instant.now(), refreshToken.getExpiry()))
+                    .maxAge(Duration.between(OffsetDateTime.now(), refreshToken.getExpiry()))
                     .sameSite("lax")
                     .build();
             UserDTO userDTO = modelMapper.map(refreshToken.getUser(), UserDTO.class);
-            List<RefreshToken> refreshTokens = refreshTokenService.fetchRefreshTokensOfUser(user.getUserId());
-            for(RefreshToken refreshToken1 : refreshTokens){
-                userDTO.getActiveSessions().add(new SessionInfo(refreshToken1.getSessionId(), refreshToken1.getDeviceType(), refreshToken1.getDeviceInfo(), refreshToken1.getIpAddress(), refreshToken1.getCreatedAt(), refreshToken.getSessionId().equals(refreshToken1.getSessionId())));
+            List<Session> activeSessions = sessionRepo.findByUserUserIdAndActiveTrue(user.getUserId());
+            for(Session session1 : activeSessions){
+                userDTO.getActiveSessions().add(new SessionInfo(session1.getSessionId(), session1.getDeviceType(), session1.getDeviceInfo(), session1.getIpAddress(), session1.getCreatedAt(), session1.getSessionId().equals(session.getSessionId())));
             }
             return ResponseEntity.ok()
-                    .header(HttpHeaders.SET_COOKIE, refreshTokenCookie.toString(), HttpHeaders.SET_COOKIE, sessionIdCookie.toString())
-                    .body(new LoginResponse(userDTO , loginRequest.getUsername(),token, roles, Instant.now().plusMillis(jwtExpiry)));
+                    .header(HttpHeaders.SET_COOKIE, refreshTokenCookie.toString())
+                    .header(HttpHeaders.SET_COOKIE, sessionIdCookie.toString())
+                    .body(new LoginResponse(
+                            userDTO,
+                            loginRequest.getUsername(),
+                            token,
+                            roles,
+                            OffsetDateTime.now().plusMinutes(refreshTokenExpiry)
+                    ));
         }
         catch (Exception e){
             System.out.println("Exception Occurred in Login " + e);
@@ -219,13 +272,13 @@ public class AuthController {
 
     @PostMapping("/verify")
     public ResponseEntity<?> verifyAccount(@RequestParam String token){
-        System.out.println("Token is " + token);
+//        System.out.println("Token is " + token);
         String email = otpService.verifyVerificationToken(token);
         if(email!=null){
             User user = userRepo.getByEmail(email);
             user.setAccountStatus(AccountStatus.VERIFIED);
             userRepo.save(user);
-            System.out.println("Account Verified Successfully for " + email);
+//            System.out.println("Account Verified Successfully for " + email);
             return ResponseEntity.ok().body(Map.of("success", "true", "message", "Account verified Successfully"));
         }
         return ResponseEntity.badRequest().body(Map.of("success", "false"));

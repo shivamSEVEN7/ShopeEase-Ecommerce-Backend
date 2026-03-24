@@ -62,6 +62,7 @@ public class EmailServiceImpl implements EmailService {
 
         }
         catch (Exception e) {
+            System.out.println("Some Error in sending mail");
             System.out.println(e.getMessage());
         }
     }

@@ -36,9 +36,7 @@ public class OrderScheduler {
     @Autowired
     private PaymentRepo paymentRepository;
 
-
     Logger logger = LoggerFactory.getLogger(OrderScheduler.class);
-
 
     @PostConstruct
     public void init() {

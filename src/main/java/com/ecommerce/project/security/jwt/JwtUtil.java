@@ -14,10 +14,17 @@ import java.util.Date;
 
 @Component
 public class JwtUtil {
-    private final String SECRET = "hiuhiosdhskinbhyi0jb19h0jgiasdh7h98jgh2";
-    @Value("${jwt.expiration}")
-    private long EXPIRATION ;
-    private final SecretKey key = Keys.hmacShaKeyFor(SECRET.getBytes());
+    private final SecretKey key;
+    private final long EXPIRATION;
+
+    public JwtUtil(
+            @Value("${jwt.secret}") String secret,
+            @Value("${jwt.expiration}") long expiration
+    ) {
+        this.EXPIRATION = expiration;
+        this.key = Keys.hmacShaKeyFor(secret.getBytes());
+    }
+
     public String generateToken(String username){
         return  Jwts.builder()
                 .issuedAt(new Date())
