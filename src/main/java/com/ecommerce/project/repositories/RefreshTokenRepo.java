@@ -5,11 +5,15 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface RefreshTokenRepo extends JpaRepository<RefreshToken, Long> {
 
-    RefreshToken findBySessionId(String sessionId);
+    RefreshToken findBySession_SessionId(String sessionId);
 
     List<RefreshToken> findAllByUser_UserIdOrderByCreatedAtDesc(Long userId);
+
+    Optional<RefreshToken> findByHashedRefreshToken(String hashedRefreshToken);
+    int deleteBySession_SessionId(String sessionId);
 }

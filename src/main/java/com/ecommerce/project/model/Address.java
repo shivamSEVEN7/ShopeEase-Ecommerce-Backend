@@ -7,6 +7,8 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.math.BigDecimal;
+
 @Entity
 @NoArgsConstructor
 @Getter
@@ -36,6 +38,10 @@ public class Address {
     @NotBlank
     private String mobileNumber;
     private String landmark;
+    @Column(precision = 10, scale = 8)
+    private BigDecimal latitude;
+    @Column(precision = 11, scale = 8)
+    private BigDecimal longitude;
     @ManyToOne
     @JoinColumn(name = "user_id")
     private User user;

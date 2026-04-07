@@ -1,6 +1,7 @@
 package com.ecommerce.project.security.jwt;
 
 import com.ecommerce.project.security.jwt.JwtUtil;
+import io.jsonwebtoken.ExpiredJwtException;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -23,29 +24,50 @@ public class JwtFilter extends OncePerRequestFilter {
     @Autowired
     UserDetailsService userDetailsService;
     @Override
-    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain) throws ServletException, IOException {
-//        String token  = jwtUtil.extractTokenFromCookie(request);
-        String authHeader = request.getHeader("Authorization");
-        String token  = null;
-        if(authHeader!=null && authHeader.startsWith("Bearer")){
-            token = jwtUtil.extractTokenFromHeader(authHeader);
-        }
-        String username = null;
-        if(token!=null){
-            username = jwtUtil.extractUsernameFromToken(token);
-        }
+    protected void doFilterInternal(HttpServletRequest request,
+                                    HttpServletResponse response,
+                                    FilterChain filterChain)
+            throws ServletException, IOException {
 
-        if(username!=null && SecurityContextHolder.getContext().getAuthentication()==null){
-            UserDetails userDetails = userDetailsService.loadUserByUsername(username);
-            if(jwtUtil.verifyToken(token, userDetails, username)){
-                UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
-                authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
-                SecurityContextHolder.getContext().setAuthentication(authToken);
+        try {
+            String authHeader = request.getHeader("Authorization");
+            String token  = null;
+
+            if(authHeader != null && authHeader.startsWith("Bearer")){
+                token = jwtUtil.extractTokenFromHeader(authHeader);
             }
+
+            String username = null;
+
+            if(token != null){
+                username = jwtUtil.extractUsernameFromToken(token);
+            }
+
+            if(username != null && SecurityContextHolder.getContext().getAuthentication() == null){
+                UserDetails userDetails = userDetailsService.loadUserByUsername(username);
+
+                if(jwtUtil.verifyToken(token, userDetails, username)){
+                    UsernamePasswordAuthenticationToken authToken =
+                            new UsernamePasswordAuthenticationToken(
+                                    userDetails, null, userDetails.getAuthorities());
+
+                    authToken.setDetails(
+                            new WebAuthenticationDetailsSource().buildDetails(request));
+
+                    SecurityContextHolder.getContext().setAuthentication(authToken);
+                }
+            }
+
+            filterChain.doFilter(request, response);
+
+        } catch (ExpiredJwtException ex) {
+            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+            response.setContentType("application/json");
+
+            response.getWriter().write(
+                    "{\"message\": \"Token expired\", \"success\": false}"
+            );
         }
-
-        filterChain.doFilter(request, response);
-
     }
 }
 

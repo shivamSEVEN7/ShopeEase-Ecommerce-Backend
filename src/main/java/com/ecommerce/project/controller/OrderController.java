@@ -32,12 +32,12 @@ public class OrderController {
     @PostMapping("/orders/payment/success")
     public String verifyPaymentAndConfirmOrder(@RequestParam PayUResponse payUResponse) {
         System.out.println("Payment is succesfull");
-        return null; // Replace with actual implementation
+        return null;
     }
     @PostMapping("/orders/payment/failure")
     public String paymentFiled(@RequestParam Map<String, String> response) {
         System.out.println("Payment is Failed");
-        return null; // Replace with actual implementation
+        return null;
     }
 
     @GetMapping("/orders/status")

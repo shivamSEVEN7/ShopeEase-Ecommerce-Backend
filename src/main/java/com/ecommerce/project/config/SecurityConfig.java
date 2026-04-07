@@ -38,8 +38,8 @@ public class SecurityConfig {
                 .headers(headers -> headers.frameOptions(HeadersConfigurer.FrameOptionsConfig::sameOrigin))
                 .formLogin(AbstractHttpConfigurer::disable)
                 .authorizeHttpRequests(authorize -> authorize
-                        .requestMatchers("/api/public/categories","/api/public/products","/api/register", "/h2-console/**", "/api/auth/login", "/api/auth/signup", "/api/auth/role", "/api/auth/refresh", "/images/**", "/test/**", "/api/payments/webhooks/success","/api/payments/webhooks/failure","/api/payments/webhooks/user-dropped", "/api/order/get-payment/{orderId}", "/api/auth/otp/generate", "/api/mail/send", "/api/auth/verify", "/api/public/products/{productId}").permitAll()
-                        .requestMatchers("/api/books").hasRole("ADMIN")
+                        .requestMatchers("/api/public/categories","/api/public/products","/api/register", "/h2-console/**", "/api/auth/login", "/api/auth/signup", "/api/auth/role", "/api/auth/refresh", "/images/**", "/test/**", "/api/payments/webhooks/success","/api/payments/webhooks/failure","/api/payments/webhooks/user-dropped", "/api/order/get-payment/{orderId}", "/api/auth/otp/generate", "/api/mail/send", "/api/auth/verify", "/api/public/products/{productId}", "/api/ads/active", "/api/location/reverse").permitAll()
+                        .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .anyRequest().authenticated()
                 ).addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
                 .build();

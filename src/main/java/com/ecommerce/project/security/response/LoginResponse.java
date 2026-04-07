@@ -5,7 +5,8 @@ import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.Setter;
 
-import java.time.Instant;
+
+import java.time.OffsetDateTime;
 import java.util.List;
 
 @Getter
@@ -18,7 +19,7 @@ public class LoginResponse {
 //    private String refreshToken;
 //    private String sessionId;
     private List<String> roles;
-    private Instant expiresAt;
+    private OffsetDateTime expiresAt;
 
 
 }

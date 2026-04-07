@@ -1,5 +1,6 @@
 package com.ecommerce.project.security.service;
 
+import com.ecommerce.project.model.AccountStatus;
 import com.ecommerce.project.model.Permissions;
 import com.ecommerce.project.model.User;
 import org.springframework.security.core.GrantedAuthority;
@@ -52,6 +53,10 @@ public class UserDetailsImpl implements UserDetails {
     public boolean isAccountNonExpired() {
         return UserDetails.super.isAccountNonExpired();
     }
+    @Override
+    public boolean isEnabled() {
+        return user.getAccountStatus().equals(AccountStatus.VERIFIED);
+    }
 
     @Override
     public boolean isAccountNonLocked() {
@@ -63,8 +68,8 @@ public class UserDetailsImpl implements UserDetails {
         return UserDetails.super.isCredentialsNonExpired();
     }
 
-    @Override
-    public boolean isEnabled() {
-        return UserDetails.super.isEnabled();
-    }
+//    @Override
+//    public boolean isEnabled() {
+//        return UserDetails.super.isEnabled();
+//    }
 }

@@ -2,6 +2,7 @@ package com.ecommerce.project.service;
 
 import com.ecommerce.project.dto.CategoryDTO;
 import com.ecommerce.project.dto.CategoryResponse;
+import com.ecommerce.project.dto.FileInfo;
 import com.ecommerce.project.exceptions.APIException;
 import com.ecommerce.project.exceptions.ResourceNotFoundException;
 import com.ecommerce.project.model.Category;
@@ -15,8 +16,10 @@ import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -27,36 +30,52 @@ public class CatergoryImpl implements CategoryService{
     CategoryRepo categoryRepo;
     @Autowired
     private ModelMapper modelMapper;
+    @Autowired
+    private FileService fileService;
+
+//    @Override
+//    public CategoryResponse getAllCategories(int pageNumber, int pageSize, String sortBy, String sortOrder) {
+//        Sort sortingDetails = sortOrder.equalsIgnoreCase("asc")
+//                ? Sort.by(sortBy).ascending()
+//                : Sort.by(sortBy).descending();
+//        Pageable pageable = PageRequest.of(pageNumber, pageSize, sortingDetails);
+//        Page<Category> categoriesPage = categoryRepo.findAll(pageable);
+//        List<Category> categories = categoriesPage.getContent();
+//        if(categories.isEmpty()){
+//            throw new APIException("No Categories Found");
+//        }
+//        List<CategoryDTO> categoryDTOS =  categories.stream().map(category -> modelMapper.map(category, CategoryDTO.class)).toList();
+//        CategoryResponse categoryResponse = new CategoryResponse();
+//        categoryResponse.setContent(categoryDTOS);
+//        categoryResponse.setPageNumber(categoriesPage.getNumber());
+//        categoryResponse.setPageSize(categoriesPage.getSize());
+//        categoryResponse.setTotalPages(categoriesPage.getTotalPages());
+//        categoryResponse.setTotalElements(categoriesPage.getTotalElements());
+//        categoryResponse.setIsLast(categoriesPage.isLast());
+//        return categoryResponse;
+//    }
+    @Override
+public List<CategoryDTO> getAllCategories() {
+    List<Category> categories = categoryRepo.findAll(Sort.by("categoryName").ascending());
+    return categories.stream()
+            .map(cat -> modelMapper.map(cat, CategoryDTO.class))
+            .toList();
+}
+
 
     @Override
-    public CategoryResponse getAllCategories(int pageNumber, int pageSize, String sortBy, String sortOrder) {
-        Sort sortingDetails = sortOrder.equalsIgnoreCase("asc")
-                ? Sort.by(sortBy).ascending()
-                : Sort.by(sortBy).descending();
-        Pageable pageable = PageRequest.of(pageNumber, pageSize, sortingDetails);
-        Page<Category> categoriesPage = categoryRepo.findAll(pageable);
-        List<Category> categories = categoriesPage.getContent();
-        if(categories.isEmpty()){
-            throw new APIException("No Categories Found");
-        }
-        List<CategoryDTO> categoryDTOS =  categories.stream().map(category -> modelMapper.map(category, CategoryDTO.class)).toList();
-        CategoryResponse categoryResponse = new CategoryResponse();
-        categoryResponse.setContent(categoryDTOS);
-        categoryResponse.setPageNumber(categoriesPage.getNumber());
-        categoryResponse.setPageSize(categoriesPage.getSize());
-        categoryResponse.setTotalPages(categoriesPage.getTotalPages());
-        categoryResponse.setTotalElements(categoriesPage.getTotalElements());
-        categoryResponse.setIsLast(categoriesPage.isLast());
-        return categoryResponse;
-    }
-
-    @Override
-    public CategoryDTO createCategory(CategoryDTO categoryDTO) {
-        Category existingCategory = categoryRepo.findByCategoryName(categoryDTO.getCategoryName());
+    public CategoryDTO createCategory(String name, MultipartFile icon) {
+        Category existingCategory = categoryRepo.findByCategoryName(name);
         if (existingCategory != null) {
             throw new APIException("Duplicate Category Name");
         }
-        Category savedCategory =  categoryRepo.save(modelMapper.map(categoryDTO, Category.class));
+        FileInfo uploadedIcon;
+        try {
+            uploadedIcon = fileService.uploadIcon(icon);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+        Category savedCategory =  categoryRepo.save(new Category(name, uploadedIcon.getUrl()));
         return modelMapper.map(savedCategory, CategoryDTO.class);
     }
 

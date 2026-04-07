@@ -1,6 +1,7 @@
 package com.ecommerce.project.exceptions;
 
 import com.ecommerce.project.dto.APIResponse;
+import io.jsonwebtoken.ExpiredJwtException;
 import jakarta.validation.ConstraintViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -46,7 +47,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<APIResponse> handleException(AccessDeniedException ex){
         APIResponse apiResponse = new APIResponse(ex.getMessage(), false);
-        return new ResponseEntity<>(apiResponse, HttpStatus.BAD_REQUEST);
+        return new ResponseEntity<>(apiResponse, HttpStatus.UNAUTHORIZED);
     }
 
     @ExceptionHandler(BadCredentialsException.class)
