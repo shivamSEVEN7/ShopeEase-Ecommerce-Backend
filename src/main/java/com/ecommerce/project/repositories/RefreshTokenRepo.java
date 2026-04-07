@@ -15,4 +15,5 @@ public interface RefreshTokenRepo extends JpaRepository<RefreshToken, Long> {
     List<RefreshToken> findAllByUser_UserIdOrderByCreatedAtDesc(Long userId);
 
     Optional<RefreshToken> findByHashedRefreshToken(String hashedRefreshToken);
+    int deleteBySession_SessionId(String sessionId);
 }

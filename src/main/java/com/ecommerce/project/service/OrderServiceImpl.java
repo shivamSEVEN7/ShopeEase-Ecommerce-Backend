@@ -55,8 +55,9 @@ public class OrderServiceImpl implements OrderService{
     OrderScheduler orderScheduler;
     @Autowired
     private CashFreeService cashFreeService;
-    @Value("${image.base.url}")
-    private String imagePath;
+    @Autowired
+    private ProductRepo productRepo;
+
 
     @Override
     @Transactional
@@ -95,6 +96,7 @@ public class OrderServiceImpl implements OrderService{
         }
         orderScheduler.scheduleOrderCheck(order.getId(), order.getCreatedAt().plusHours(6).toLocalDateTime());
         if(orderRequestDTO.getPaymentMode().equalsIgnoreCase("Cash On Delivery")){
+
            Order updatedOrder =  paymentService.initiateCodPayment(order, orderRequestDTO.getPaymentMode());
             return new CreateOrderResponse(null, orderId);
         }
@@ -104,6 +106,7 @@ public class OrderServiceImpl implements OrderService{
     }
 
     @Override
+    @Transactional
     public OrderStatus getOrderStatus(String orderId){
        Order order =  orderRepository.findByOrderIdAndUser(orderId, authUtil.loggedInUser());
        if(order==null){
@@ -113,6 +116,12 @@ public class OrderServiceImpl implements OrderService{
            if(order.getStatus() != OrderStatus.CONFIRMED){
                order.setStatus(OrderStatus.CONFIRMED);
                orderRepository.save(order);
+               List<OrderItem> orderItems = order.getOrderItems();
+               for (OrderItem item : orderItems){
+                   Product product =  item.getProduct();
+                   product.setQuantity(product.getQuantity()-item.getQuantity());
+                   productRepo.save(product);
+               }
                paymentService.updatePaymentSuccess(cashFreeService.fetchSuccessfulPayment(orderId), order);
                return OrderStatus.CONFIRMED;
            }
@@ -130,13 +139,40 @@ public class OrderServiceImpl implements OrderService{
         Pageable pageable = PageRequest.of(offset/limit, limit, sortingDetails);
         Page<Order> userOrdersPage =  orderRepository.findAllByUser(authUtil.loggedInUser(), pageable);
         List<Order> userOrders = userOrdersPage.getContent();
-        List<OrderDTO> userOrdersDto =  userOrders.stream()
-                .map(userOrder -> {OrderDTO dto = modelMapper.map(userOrder, OrderDTO.class);
-                    dto.setPayment(modelMapper.map(paymentService.getLastPaymentAttempt(userOrder.getOrderId()), PaymentDTO.class));
+        List<OrderDTO> userOrdersDto = new ArrayList<>();
 
-                    dto.getOrderItems().forEach(orderItem1 -> {orderItem1.getProduct().setImage(imagePath + orderItem1.getProduct().getImage());});
-                    return dto;})
-                .toList();
+        for (Order userOrder : userOrders) {
+
+
+            OrderDTO orderDTO = modelMapper.map(userOrder, OrderDTO.class);
+
+
+            Payment payment = paymentService.getLastPaymentAttempt(userOrder.getOrderId());
+            orderDTO.setPayment(modelMapper.map(payment, PaymentDTO.class));
+
+
+            List<OrderItemDTO> orderItemDTOs = orderDTO.getOrderItems();
+
+            for (int i = 0; i < orderItemDTOs.size(); i++) {
+
+                OrderItemDTO itemDTO = orderItemDTOs.get(i);
+                OrderItem itemEntity = userOrder.getOrderItems().get(i);
+
+
+                Product productEntity = itemEntity.getProduct();
+
+
+                ProductDTO productDTO = modelMapper.map(productEntity, ProductDTO.class);
+
+                productDTO.setImage(
+                        productEntity.getPrimaryImage().getUrl());
+
+
+                itemDTO.setProduct(productDTO);
+            }
+
+            userOrdersDto.add(orderDTO);
+        }
         return new UserOrdersResponse(userOrdersDto, new OffsetPaginationDetails(offset, limit, userOrdersPage.getTotalElements(), userOrdersPage.isLast()));
     }
 
@@ -148,19 +184,36 @@ public class OrderServiceImpl implements OrderService{
         }
         Payment payment;
         if(order.getPayment().size() ==1){
-            payment = order.getPayment().get(0);
+            payment = order.getPayment().getFirst();
         }
         else {
           payment =  paymentRepository.findFirstByReferenceOrderIdOrderByPaymentTimeDesc(order.getOrderId());
         }
-        OrderDTO orderDTO =  modelMapper.map(order, OrderDTO.class);
-        orderDTO.setPayment(modelMapper.map(payment, PaymentDTO.class));
-        orderDTO.getOrderItems().forEach(orderItem1 -> orderItem1.getProduct().setImage(imagePath + orderItem1.getProduct().getImage()));
+        OrderDTO orderDTO = modelMapper.map(order, OrderDTO.class);
+
+        orderDTO.setPayment(
+                modelMapper.map(payment, PaymentDTO.class)
+        );
+
+        for (int i = 0; i < orderDTO.getOrderItems().size(); i++) {
+
+            OrderItemDTO itemDTO = orderDTO.getOrderItems().get(i);
+            OrderItem itemEntity = order.getOrderItems().get(i);
+
+            Product productEntity = itemEntity.getProduct();
+
+            itemDTO.getProduct().setImage(productEntity.getPrimaryImage().getUrl());
+        }
         return orderDTO;
     }
    @Override
     public void cancelOrder(Long orderId){
         Order order = orderRepository.findById(orderId).orElseThrow(() -> new ResourceNotFoundException("Order", orderId, "orderId"));
+        for(OrderItem  item : order.getOrderItems()){
+            Product product = item.getProduct();
+            product.setQuantity(product.getQuantity() + item.getQuantity());
+            productRepo.save(product);
+        }
         order.setStatus(OrderStatus.CANCELLED);
         orderRepository.save(order);
     }

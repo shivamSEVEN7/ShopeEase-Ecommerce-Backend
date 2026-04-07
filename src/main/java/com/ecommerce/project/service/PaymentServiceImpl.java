@@ -8,6 +8,7 @@ import com.ecommerce.project.exceptions.ResourceNotFoundException;
 import com.ecommerce.project.model.*;
 import com.ecommerce.project.repositories.OrderRepo;
 import com.ecommerce.project.repositories.PaymentRepo;
+import com.ecommerce.project.repositories.ProductRepo;
 import com.ecommerce.project.utility.AuthUtil;
 import org.modelmapper.ModelMapper;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -18,6 +19,7 @@ import com.google.gson.JsonParser;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @Service
@@ -32,6 +34,8 @@ public class PaymentServiceImpl implements PaymentService {
     CashFreeService cashFreeService;
     @Autowired
     private AuthUtil authUtil;
+    @Autowired
+    private ProductRepo productRepo;
 
     @Override
     public String initiateOnlinePayment(Order order, String paymentMode) {
@@ -77,7 +81,15 @@ public class PaymentServiceImpl implements PaymentService {
         String referenceOrderId = order.get("order_id").getAsString();
         String cashfreeOrderStatus = cashFreeService.fetchOrderStatus(referenceOrderId);
         Order order1 = orderRepository.findByOrderId(referenceOrderId);
-        order1.setStatus(OrderStatus.CONFIRMED);
+        if(order1.getStatus() != OrderStatus.CONFIRMED){
+            order1.setStatus(OrderStatus.CONFIRMED);
+            List<OrderItem> orderItems = order1.getOrderItems();
+            for (OrderItem item : orderItems){
+                Product product =  item.getProduct();
+                product.setQuantity(product.getQuantity()-item.getQuantity());
+                productRepo.save(product);
+            }
+        }
         String cfPaymentId = payment.get("cf_payment_id").getAsString();
         String cfPaymentMessage = payment.get("payment_message").getAsString();
         String paymentMethod = payment.get("payment_group").getAsString();

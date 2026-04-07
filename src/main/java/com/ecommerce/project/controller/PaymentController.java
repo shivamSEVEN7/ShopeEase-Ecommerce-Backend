@@ -24,9 +24,9 @@ public class PaymentController {
     public ResponseEntity<String> verifyPaymentSuccess(@RequestBody String payload,
                                                       @RequestHeader("x-webhook-signature") String signature,
                                                       @RequestHeader("x-webhook-timestamp") String timestamp){
-        System.out.println("Payment SuccessFul");
+//        System.out.println("Payment SuccessFul");
         String computedSignature = cashFreeService.generateSignature(timestamp, payload);
-        System.out.println("Payment Successful and Computed signature is " + computedSignature + " Original Signature is " + signature);
+ //       System.out.println("Payment Successful and Computed signature is " + computedSignature + " Original Signature is " + signature);
         if(computedSignature.equals(signature)){
             paymentService.updatePaymentSuccess(payload);
         }

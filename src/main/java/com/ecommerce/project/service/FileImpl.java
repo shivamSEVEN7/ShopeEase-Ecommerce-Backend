@@ -41,4 +41,31 @@ public class FileImpl implements FileService{
         Map uploadResult = cloudinary.uploader().upload(file.getBytes(), params);
         return new FileInfo(uploadResult.get("public_id").toString(), uploadResult.get("secure_url").toString());
     }
+    @Override
+    public FileInfo uploadIcon(MultipartFile file) throws IOException {
+        Map params = ObjectUtils.asMap(
+                "folder", "shopease/svgs"
+        );
+        Map uploadResult = cloudinary.uploader().upload(file.getBytes(), params);
+        return new FileInfo(uploadResult.get("public_id").toString(), uploadResult.get("secure_url").toString());
+    }
+
+    @Override
+    public FileInfo uploadAdBanner(MultipartFile file) throws IOException {
+        Map params = ObjectUtils.asMap(
+                "folder", "shopease/assets/others"
+        );
+        Map uploadResult = cloudinary.uploader().upload(file.getBytes(), params);
+        return new FileInfo(uploadResult.get("public_id").toString(), uploadResult.get("secure_url").toString());
+    }
+
+    @Override
+    public FileInfo uploadAdImage(MultipartFile file) throws IOException {
+        Map params = ObjectUtils.asMap(
+                "folder", "shopease/assets/images"
+        );
+        Map uploadResult = cloudinary.uploader().upload(file.getBytes(), params);
+        return new FileInfo(uploadResult.get("public_id").toString(), uploadResult.get("secure_url").toString());
+    }
+
 }

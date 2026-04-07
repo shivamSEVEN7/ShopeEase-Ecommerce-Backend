@@ -24,9 +24,6 @@ public class ProductDTO {
     private String slug;
     private CategoryDTO category;
     private SellerResponseDTO seller;
-//    public String getImage() {
-//        String baseUrl = "http://localhost:8080/images/";
-//        return baseUrl + image;
-//    }
+
 
 }

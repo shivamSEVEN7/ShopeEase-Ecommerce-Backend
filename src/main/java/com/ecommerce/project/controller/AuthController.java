@@ -13,13 +13,12 @@ import com.ecommerce.project.security.request.SignupRequest;
 import com.ecommerce.project.security.response.LoginResponse;
 import com.ecommerce.project.security.response.UserInfoResponse;
 import com.ecommerce.project.security.service.UserDetailsImpl;
-import com.ecommerce.project.service.EmailService;
-import com.ecommerce.project.service.HmacService;
-import com.ecommerce.project.service.OtpService;
-import com.ecommerce.project.service.RefreshTokenService;
+import com.ecommerce.project.service.*;
+import com.ecommerce.project.utility.AuthUtil;
 import com.ecommerce.project.utility.ClientInfoUtil;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.transaction.Transactional;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.modelmapper.ModelMapper;
@@ -39,6 +38,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
@@ -54,6 +54,8 @@ public class AuthController {
     @Autowired
     JwtUtil jwtUtil;
     @Autowired
+    AuthUtil authUtil;
+    @Autowired
     UserRepo userRepo;
     @Autowired
     PasswordEncoder passwordEncoder;
@@ -66,7 +68,9 @@ public class AuthController {
     @Autowired
     RefreshTokenRepo refreshTokenRepo;
     @Value("${refreshtoken.expiration}")
-    private long refreshTokenExpiry;
+    private long refreshTokenExpiration;
+    @Value(("${jwt.expiration}"))
+    private long jwtExpiration;
     @Autowired
     private ModelMapper modelMapper;
     @Autowired
@@ -77,19 +81,28 @@ public class AuthController {
     private SessionRepo sessionRepo;
     @Autowired
     private HmacService hmacService;
-
+    @Autowired
+    private SessionService sessionService;
+    @Value("${frontend.url}")
+    private String frontEnd;
+    @Value("${refreshtoken.shortexpiration}")
+    private long refreshTokenShortExpiration;
 
    @PostMapping("/refresh")
    ResponseEntity<?> issueTokens(@CookieValue(value = "refreshToken", required = false) String refreshToken, @CookieValue(value = "sessionId", required = false) String sessionId, HttpServletRequest request){
-       String hashedOldRefreshToken = hmacService.hash(refreshToken);
+       String hashedOldRefreshToken = null;
+       if(refreshToken!=null){
+           hashedOldRefreshToken = hmacService.hash(refreshToken);
+       }
        if(refreshTokenService.validateRefreshToken(hashedOldRefreshToken,sessionId)){
            String newRawRefreshToken = UUID.randomUUID().toString();
            RefreshToken newRefreshToken = null;
             Optional<RefreshToken> oldRefreshTokenOptional = refreshTokenRepo.findByHashedRefreshToken(hashedOldRefreshToken);
+            Session session = sessionRepo.findBySessionId(sessionId);
             RefreshToken oldRefreshToken = oldRefreshTokenOptional.get();
            if (oldRefreshToken.isUsed()) {
                if (oldRefreshToken.isWithinGracePeriod()) {
-                   newRefreshToken = refreshTokenService.rotateRefreshTokens(oldRefreshToken, newRawRefreshToken);
+                   newRefreshToken = refreshTokenService.rotateRefreshTokensWithinGrace(oldRefreshToken, newRawRefreshToken);
                } else {
                    System.out.println("Token Reuse Detected");
                }
@@ -109,14 +122,14 @@ public class AuthController {
                    .httpOnly(true)
                    .secure(false)
                    .path("/")
-                   .maxAge(Duration.between(OffsetDateTime.now(), newRefreshToken.getExpiry()))
+                   .maxAge(session.isRememberMe()?Duration.between(OffsetDateTime.now(), newRefreshToken.getExpiry()):Duration.ofSeconds(-1))
                    .sameSite("lax")
                    .build();
            ResponseCookie sessionIdCookie = ResponseCookie.from("sessionId", newRefreshToken.getSession().getSessionId())
                    .httpOnly(true)
                    .secure(false)
                    .path("/")
-                   .maxAge(Duration.between(OffsetDateTime.now(), newRefreshToken .getExpiry()))
+                   .maxAge(session.isRememberMe()?Duration.between(OffsetDateTime.now(), newRefreshToken.getExpiry()):Duration.ofSeconds(-1))
                    .sameSite("lax")
                    .build();
            return ResponseEntity.ok()
@@ -127,10 +140,9 @@ public class AuthController {
                            user.getUsername(),
                            newJwtToken,
                            roles,
-                           OffsetDateTime.now().plusMinutes(refreshTokenExpiry)
+                           OffsetDateTime.now().plusMinutes(jwtExpiration/60000)
                    ));
        }
-       else {
            System.out.println("Inalid Refresh token found now logout");
            ResponseCookie refreshTokenCookie = ResponseCookie.from("refreshToken", null)
                    .httpOnly(true)
@@ -149,14 +161,14 @@ public class AuthController {
            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                    .header(HttpHeaders.SET_COOKIE, refreshTokenCookie.toString(),  HttpHeaders.SET_COOKIE, sessionIdCookie.toString())
                    .body(Map.of("error", "Unauthorized", "message", "Invalid token"));
-       }
+
 
    }
 
     @PostMapping("/login")
     ResponseEntity<?> login(@RequestBody LoginRequest loginRequest, HttpServletRequest request){
         try{
-           Authentication authentication = authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(loginRequest.getUsername(), loginRequest.getPassword()));
+           Authentication authentication = authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(loginRequest.getIdentifier(), loginRequest.getPassword()));
            User user= ((UserDetailsImpl) authentication.getPrincipal()).getUser();
            if(user.getAccountStatus() == AccountStatus.UNVERIFIED){
                return ResponseEntity.status(HttpStatus.FORBIDDEN)
@@ -165,37 +177,38 @@ public class AuthController {
                                "message", "Your account is not verified"
                        ));
            }
-
             Session session = Session.builder()
                     .sessionId(UUID.randomUUID().toString())
-                    .user(userRepo.findByUsername(loginRequest.getUsername()).orElseThrow(() -> new UsernameNotFoundException("Username not found")))
+                    .user(userRepo.findByUsername(user.getUsername()).orElseThrow(() -> new UsernameNotFoundException("Username not found")))
                     .deviceType(clientInfoUtil.getDeviceType(request))
                     .deviceInfo(clientInfoUtil.getClientDeviceInfo(request))
                     .ipAddress(clientInfoUtil.getClientIpAddress(request))
                     .active(true)
+                    .rememberMe(loginRequest.getRememberMe())
+                    .expiry(OffsetDateTime.now().plusMinutes(loginRequest.getRememberMe()?refreshTokenExpiration:refreshTokenShortExpiration))
                     .build();
             sessionRepo.save(session);
-           String token = jwtUtil.generateToken(loginRequest.getUsername());
+           String token = jwtUtil.generateToken(user.getUsername());
            String rawRefreshToken = UUID.randomUUID().toString();
-           RefreshToken refreshToken = refreshTokenService.generateRefreshToken(rawRefreshToken, loginRequest.getUsername(), session);
+           RefreshToken refreshToken = refreshTokenService.generateRefreshToken(rawRefreshToken, user.getUsername(), session);
            List<String> roles = refreshToken.getUser().getRoles().stream().map(role -> role.getRoleName().toString()).toList();
            refreshTokenRepo.save(refreshToken);
            ResponseCookie refreshTokenCookie = ResponseCookie.from("refreshToken", rawRefreshToken)
                     .httpOnly(true)
                     .secure(false)
                     .path("/")
-                    .maxAge(Duration.between(OffsetDateTime.now(), refreshToken.getExpiry()))
+                    .maxAge(loginRequest.getRememberMe()?Duration.between(OffsetDateTime.now(), refreshToken.getExpiry()):Duration.ofSeconds(-1))
                     .sameSite("lax")
                     .build();
            ResponseCookie sessionIdCookie = ResponseCookie.from("sessionId", session.getSessionId())
                     .httpOnly(true)
                     .secure(false)
                     .path("/")
-                    .maxAge(Duration.between(OffsetDateTime.now(), refreshToken.getExpiry()))
-                    .sameSite("lax")
+                   .maxAge(loginRequest.getRememberMe()?Duration.between(OffsetDateTime.now(), refreshToken.getExpiry()):Duration.ofSeconds(-1))
+                   .sameSite("lax")
                     .build();
             UserDTO userDTO = modelMapper.map(refreshToken.getUser(), UserDTO.class);
-            List<Session> activeSessions = sessionRepo.findByUserUserIdAndActiveTrue(user.getUserId());
+            List<Session> activeSessions = sessionRepo.findByUserUserIdAndActiveTrueAndExpiryAfter(user.getUserId(), OffsetDateTime.now());
             for(Session session1 : activeSessions){
                 userDTO.getActiveSessions().add(new SessionInfo(session1.getSessionId(), session1.getDeviceType(), session1.getDeviceInfo(), session1.getIpAddress(), session1.getCreatedAt(), session1.getSessionId().equals(session.getSessionId())));
             }
@@ -204,10 +217,10 @@ public class AuthController {
                     .header(HttpHeaders.SET_COOKIE, sessionIdCookie.toString())
                     .body(new LoginResponse(
                             userDTO,
-                            loginRequest.getUsername(),
+                            user.getUsername(),
                             token,
                             roles,
-                            OffsetDateTime.now().plusMinutes(refreshTokenExpiry)
+                            OffsetDateTime.now().plusMinutes(jwtExpiration/60000)
                     ));
         }
         catch (Exception e){
@@ -237,48 +250,65 @@ public class AuthController {
 
         User savedUser = userRepo.save(newUser);
         String verificationToken = otpService.generateVerificationToken(signupRequest.getEmail());
-        emailService.sendVerificationMail(signupRequest.getEmail(), "Verification Mail", "http://localhost:5173/verify?token=" + verificationToken);
+        emailService.sendVerificationMail(signupRequest.getEmail(), "Verification Mail", frontEnd + "/verify?token=" + verificationToken);
         return new ResponseEntity<>(savedUser, HttpStatus.CREATED);
     }
 
     @PostMapping("/logout")
-    public ResponseEntity<?> logout(@CookieValue(value = "refreshToken", required = false) String refreshToken, @CookieValue(value = "sessionId", required = false) String sessionId) {
+    @Transactional
+    public ResponseEntity<?> logout(
+            @CookieValue(value = "refreshToken", required = false) String refreshToken,
+            @CookieValue(value = "sessionId", required = false) String sessionId) {
+
+        // Delete refreshToken cookie
         ResponseCookie refreshTokenCookie = ResponseCookie.from("refreshToken", "")
                 .httpOnly(true)
                 .secure(true)
                 .path("/")
-                .maxAge(0)             // delete cookie
-                .sameSite("lax")
+                .maxAge(0)
+                .sameSite("Lax")
                 .build();
+
+        // Delete sessionId cookie
         ResponseCookie sessionIdCookie = ResponseCookie.from("sessionId", "")
                 .httpOnly(true)
                 .secure(true)
                 .path("/")
                 .maxAge(0)
-                .sameSite("lax")
+                .sameSite("Lax")
                 .build();
-        refreshTokenService.invalidateRefreshToken(refreshToken, sessionId);
+
+        // Invalidate session safely
+        if (sessionId != null && !sessionId.isEmpty() && sessionService.validateSessionId(refreshToken, sessionId)) {
+            sessionService.invalidateSession(sessionId);
+        }
+
         return ResponseEntity.ok()
-                .header(HttpHeaders.SET_COOKIE, refreshTokenCookie.toString(), HttpHeaders.SET_COOKIE, sessionIdCookie.toString())
+                .header(HttpHeaders.SET_COOKIE, refreshTokenCookie.toString())
+                .header(HttpHeaders.SET_COOKIE, sessionIdCookie.toString())
                 .body(Map.of("message", "logged out"));
     }
 
     @PostMapping("/sessions/{sessionId}/logout")
+    @Transactional
     public ResponseEntity<?> logoutFromOtherDevice(@PathVariable String sessionId) {
-        refreshTokenService.invalidateRefreshTokenOtherDevice(sessionId);
+                Session sessionToBeDeleted = sessionRepo.findBySessionId(sessionId);
+                if(sessionToBeDeleted.getUser().getUserId() == authUtil.loggedInUserId()){
+                    sessionService.invalidateSession(sessionId);
+                }
         return ResponseEntity.ok()
                 .body(Map.of("message", "logged out"));
     }
 
     @PostMapping("/verify")
     public ResponseEntity<?> verifyAccount(@RequestParam String token){
-//        System.out.println("Token is " + token);
+
         String email = otpService.verifyVerificationToken(token);
         if(email!=null){
             User user = userRepo.getByEmail(email);
             user.setAccountStatus(AccountStatus.VERIFIED);
             userRepo.save(user);
-//            System.out.println("Account Verified Successfully for " + email);
+
             return ResponseEntity.ok().body(Map.of("success", "true", "message", "Account verified Successfully"));
         }
         return ResponseEntity.badRequest().body(Map.of("success", "false"));

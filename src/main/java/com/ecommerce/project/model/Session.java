@@ -28,9 +28,12 @@ public class Session {
     private String deviceType;
     private String deviceInfo;
     private String ipAddress;
+    private boolean rememberMe = false;
 
     @Column(nullable = false)
     private boolean active = true;
+
+    private OffsetDateTime expiry;
 
     private OffsetDateTime createdAt;
     private OffsetDateTime lastUsedAt;
@@ -45,4 +48,6 @@ public class Session {
     protected void onUpdate() {
         lastUsedAt = OffsetDateTime.now();
     }
+
+
 }

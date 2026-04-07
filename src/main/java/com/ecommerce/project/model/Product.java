@@ -62,6 +62,8 @@ public class Product {
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;
 
+
+
     @PrePersist
     public void prePersist() {
         this.createdAt = OffsetDateTime.now();
@@ -73,6 +75,13 @@ public class Product {
         this.updatedAt = OffsetDateTime.now();
     }
 
-
+    public Image getPrimaryImage(){
+        if (images == null || images.isEmpty()) return null;
+        for (Image image : images){
+            if(image.getIsPrimary())
+                return image;
+        }
+        return null;
+    }
 
 }

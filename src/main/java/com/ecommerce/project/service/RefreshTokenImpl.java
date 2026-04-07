@@ -9,6 +9,7 @@ import com.ecommerce.project.utility.AuthUtil;
 import com.ecommerce.project.utility.ClientInfoUtil;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -34,6 +35,10 @@ public class RefreshTokenImpl implements RefreshTokenService{
     private AuthUtil authUtil;
     @Autowired
     private HmacService hmacService;
+    @Value("${refreshtoken.expiration}")
+    private long refreshTokenExpiration;
+    @Value("${refreshtoken.shortexpiration}")
+    private long refreshTokenShortExpiration;
 
     @Override
     public RefreshToken generateRefreshToken(String rawToken, String username, Session session) {
@@ -41,7 +46,7 @@ public class RefreshTokenImpl implements RefreshTokenService{
         String encryptedToken = hmacService.hash(rawToken);
         RefreshToken refreshToken = RefreshToken.builder()
                 .hashedRefreshToken(encryptedToken)
-                .expiry(OffsetDateTime.now().plusDays(7))
+                .expiry(session.isRememberMe()?OffsetDateTime.now().plusMinutes(refreshTokenExpiration):OffsetDateTime.now().plusMinutes(refreshTokenShortExpiration))
                 .user(userRepo.findByUsername(username)
                         .orElseThrow(() -> new UsernameNotFoundException("Username not found")))
                 .session(session)
@@ -99,6 +104,24 @@ public class RefreshTokenImpl implements RefreshTokenService{
     }
 
     @Override
+    public RefreshToken rotateRefreshTokensWithinGrace(RefreshToken oldRefreshToken, String rawRefreshToken) {
+        OffsetDateTime now = OffsetDateTime.now();
+        oldRefreshToken.setUsed(true);
+        oldRefreshToken.setRotatedAt(now);
+        oldRefreshToken.setGraceUntil(now.plusSeconds(60));
+        RefreshToken updatedRefreshToken = generateRefreshToken(rawRefreshToken, oldRefreshToken.getUser().getUsername(), oldRefreshToken.getSession());
+        updatedRefreshToken = refreshTokenRepo.save(updatedRefreshToken);
+        if(oldRefreshToken.getReplacedBy()!=null){
+            RefreshToken oldReplacedBy = oldRefreshToken.getReplacedBy();
+            oldRefreshToken.setReplacedBy(updatedRefreshToken);
+            refreshTokenRepo.save(oldRefreshToken);
+            refreshTokenRepo.delete(oldReplacedBy);
+        }
+
+        return updatedRefreshToken;
+    }
+
+    @Override
     public void invalidateRefreshToken(String refreshToken, String sessionId) {
         Optional<RefreshToken> refreshTokenOpt = refreshTokenRepo.findByHashedRefreshToken(hmacService.hash(refreshToken));
             RefreshToken refreshToken1 = refreshTokenOpt.get();
@@ -119,6 +142,8 @@ public class RefreshTokenImpl implements RefreshTokenService{
         List<RefreshToken> refreshTokens = refreshTokenRepo.findAllByUser_UserIdOrderByCreatedAtDesc(userId);
         return refreshTokens;
     }
+
+
 
 
 }

@@ -13,7 +13,7 @@ public interface RefreshTokenService {
     Boolean validateRefreshToken(String hashedRefreshToken, String sessionId);
 
     RefreshToken rotateRefreshTokens(RefreshToken oldRefreshToken, String rawRefreshToken);
-
+    RefreshToken rotateRefreshTokensWithinGrace(RefreshToken oldRefreshToken, String rawRefreshToken);
     void invalidateRefreshToken(String refreshToken, String sessionId);
     void invalidateRefreshTokenOtherDevice(String sessionId);
 
